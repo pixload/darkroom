@@ -1,0 +1,75 @@
+# --- Security & Secrets (CRITICAL) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# --- OS Generated Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- Editor & IDE Temporary Files ---
+# Vim / Vi
+*.swp
+*.swo
+*~
+*.pyc
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# IntelliJ / JetBrains
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# --- Docker ---
+docker-compose.override.yml
+.docker/
+
+# --- Project Specific ---
+# Temporary processing directories created during local testing
+/tmp/
+output.*
+*.log

@@ -1,0 +1,45 @@
+services:
+  image-engine:
+    build: .
+    image: pixload/image-engine:latest
+    container_name: pixload-image-engine
+    restart: unless-stopped
+    
+    ports:
+      - "${PIXLOAD_PORT}:8000"
+    
+    env_file:
+      - .env
+      
+    environment:
+      # App Config
+      PIXLOAD_IMAGE_TOKEN: ${PIXLOAD_IMAGE_TOKEN}
+      
+      # Storage
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      
+      # Performance
+      MAGICK_THREAD_LIMIT: ${MAGICK_THREAD_LIMIT}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS}
+      
+      # Security
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB}
+      PROCESS_TIMEOUT_SEC: ${PROCESS_TIMEOUT_SEC}
+
+    deploy:
+      resources:
+        limits:
+          cpus: "${PIXLOAD_CPU_LIMIT}"
+          memory: ${PIXLOAD_MEMORY_LIMIT}
+    
+    tmpfs:
+      - /tmp:size=${PIXLOAD_TMPFS_SIZE}
+    
+    ulimits:
+      nofile: 1048576
