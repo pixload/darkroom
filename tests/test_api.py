@@ -92,7 +92,6 @@ async def test_convert_png_to_jpg(client):
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/jpeg"
-    # JPEG magic bytes
     assert resp.content[:2] == b"\xff\xd8"
 
 
@@ -155,7 +154,6 @@ async def test_convert_to_webp(client):
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/webp"
-    # WebP magic: RIFF....WEBP
     assert resp.content[:4] == b"RIFF"
     assert resp.content[8:12] == b"WEBP"
 
@@ -175,3 +173,57 @@ async def test_convert_strip_exif(client):
     )
     assert resp.status_code == 200
     assert resp.content[:2] == b"\xff\xd8"
+
+
+@pytest.mark.anyio
+async def test_convert_corrupted_file(client):
+    """Sending garbage data should return 500, not crash."""
+    resp = await client.post(
+        "/convert",
+        data={"token": AUTH_TOKEN, "format": "jpg", "return_binary": "true"},
+        files={"file": ("bad.png", b"not an image at all", "image/png")},
+    )
+    assert resp.status_code == 500
+
+
+@pytest.mark.anyio
+async def test_convert_tiny_image(client):
+    """1x1 pixel image should process without error."""
+    png = make_png(width=1, height=1)
+    resp = await client.post(
+        "/convert",
+        data={"token": AUTH_TOKEN, "format": "jpg", "return_binary": "true"},
+        files={"file": ("tiny.png", png, "image/png")},
+    )
+    assert resp.status_code == 200
+    assert resp.content[:2] == b"\xff\xd8"
+
+
+@pytest.mark.anyio
+async def test_convert_resize_smaller_than_target_is_noop(client):
+    """Image smaller than target size should not be upscaled."""
+    png = make_png(width=10, height=10)
+    resp = await client.post(
+        "/convert",
+        data={
+            "token": AUTH_TOKEN,
+            "format": "png",
+            "size": "1000",
+            "return_binary": "true",
+        },
+        files={"file": ("small.png", png, "image/png")},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_convert_quality_boundaries(client):
+    """Quality 1 and 100 should both work."""
+    png = make_png(width=10, height=10)
+    for q in (1, 100):
+        resp = await client.post(
+            "/convert",
+            data={"token": AUTH_TOKEN, "format": "jpg", "q": str(q), "return_binary": "true"},
+            files={"file": ("test.png", png, "image/png")},
+        )
+        assert resp.status_code == 200

@@ -2,10 +2,12 @@
 
 import hashlib
 import ipaddress
+import json
 import logging
 import os
 import shutil
 import socket
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,23 +15,67 @@ from urllib.parse import urlparse
 import boto3
 import pyvips
 import requests
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # --- Configuration & Logging ---
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+
+class JsonFormatter(logging.Formatter):
+    """Structured JSON log formatter for production observability."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "msg": record.getMessage(),
+            "logger": record.name,
+        }
+        if hasattr(record, "request_id"):
+            entry["request_id"] = record.request_id
+        if hasattr(record, "duration_ms"):
+            entry["duration_ms"] = record.duration_ms
+        if hasattr(record, "format"):
+            entry["format"] = record.format
+        if hasattr(record, "size"):
+            entry["size"] = record.size
+        if record.exc_info and record.exc_info[0]:
+            entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(entry)
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
 logger = logging.getLogger("pixload-darkroom")
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+logger.propagate = False
 
+
+# --- App & Rate Limiting ---
+
+RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Pixload Darkroom", version="2.0")
+app.state.limiter = limiter
 
-# Auth
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"ok": False, "detail": "Rate limit exceeded. Slow down."},
+    )
+
+
+# --- Environment ---
+
 AUTH_TOKEN = os.getenv("PIXLOAD_IMAGE_TOKEN", "changeme")
 
-# S3 / R2 Storage
 S3_ENDPOINT = os.getenv("S3_ENDPOINT_URL")
 S3_BUCKET = os.getenv("S3_BUCKET", "pixload")
 S3_REGION = os.getenv("S3_REGION", "auto")
@@ -37,7 +83,6 @@ S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY_ID")
 S3_SECRET_KEY = os.getenv("S3_SECRET_ACCESS_KEY")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://cdn.pixload.events")
 
-# Safety limits
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "100")) * 1024 * 1024
 
 MIME_TYPES = {
@@ -269,7 +314,9 @@ def ping():
 
 
 @app.post("/convert")
+@limiter.limit(RATE_LIMIT)
 async def convert(
+    request: Request,
     background_tasks: BackgroundTasks,
     # Input
     file: UploadFile = File(None),
@@ -294,6 +341,8 @@ async def convert(
     # Advanced
     avif_speed: int = Form(6),
 ):
+    t0 = time.monotonic()
+
     # --- Validation ---
     if token != AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -368,6 +417,7 @@ async def convert(
         )
 
         # --- Response ---
+        duration_ms = round((time.monotonic() - t0) * 1000)
         content_type = MIME_TYPES[format]
         response_data = {"ok": True, "format": format}
 
@@ -384,13 +434,26 @@ async def convert(
                 else:
                     key_name = generated_name
 
-            logger.info(f"Uploading to S3: {key_name}")
+            logger.info(
+                f"Uploading to S3: {key_name}",
+                extra={"request_id": request_id, "duration_ms": duration_ms, "format": format},
+            )
             public_url = upload_to_s3(str(output_path), key_name, content_type)
             if public_url:
                 response_data["url"] = public_url
                 response_data["key"] = key_name
             else:
                 response_data["error"] = "S3 upload failed"
+
+        logger.info(
+            f"Processed {format} in {duration_ms}ms",
+            extra={
+                "request_id": request_id,
+                "duration_ms": duration_ms,
+                "format": format,
+                "size": size,
+            },
+        )
 
         if return_binary:
             filename = key_name.split("/")[-1] if key_name else f"output.{format}"
@@ -406,8 +469,8 @@ async def convert(
     except HTTPException:
         raise
     except pyvips.Error as e:
-        logger.error(f"Image processing failed: {e}")
+        logger.error(f"Image processing failed: {e}", extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail="Image processing failed") from e
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {e}", exc_info=True, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(e)) from e
