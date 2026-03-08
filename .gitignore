@@ -73,3 +73,6 @@ docker-compose.override.yml
 /tmp/
 output.*
 *.log
+*.md.local
+CLAUDE.md
+.claude/
