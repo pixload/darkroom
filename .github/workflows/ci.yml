@@ -25,8 +25,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install libvips
-        run: sudo apt-get update && sudo apt-get install -y libvips42
+      - name: Install libvips and codecs
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libvips42 \
+            libheif1 \
+            libheif-plugin-aomdec \
+            libheif-plugin-aomenc \
+            libheif-plugin-libde265 \
+            libheif-plugin-x265
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: pytest -v
 

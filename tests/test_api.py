@@ -227,3 +227,42 @@ async def test_convert_quality_boundaries(client):
             files={"file": ("test.png", png, "image/png")},
         )
         assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_convert_size_too_large(client):
+    """Size exceeding 16384 should be rejected."""
+    png = make_png(width=10, height=10)
+    resp = await client.post(
+        "/convert",
+        data={"token": AUTH_TOKEN, "format": "jpg", "size": "20000"},
+        files={"file": ("test.png", png, "image/png")},
+    )
+    assert resp.status_code == 400
+    assert "size" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_convert_overlay_scale_out_of_range(client):
+    """overlay_scale outside 1-100 should be rejected."""
+    png = make_png(width=10, height=10)
+    resp = await client.post(
+        "/convert",
+        data={"token": AUTH_TOKEN, "format": "jpg", "overlay_scale": "0"},
+        files={"file": ("test.png", png, "image/png")},
+    )
+    assert resp.status_code == 400
+    assert "overlay_scale" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_convert_overlay_opacity_out_of_range(client):
+    """overlay_opacity outside 0-100 should be rejected."""
+    png = make_png(width=10, height=10)
+    resp = await client.post(
+        "/convert",
+        data={"token": AUTH_TOKEN, "format": "jpg", "overlay_opacity": "150"},
+        files={"file": ("test.png", png, "image/png")},
+    )
+    assert resp.status_code == 400
+    assert "overlay_opacity" in resp.json()["detail"].lower()

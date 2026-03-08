@@ -1,6 +1,7 @@
 """Pixload Darkroom — High-performance image processing microservice."""
 
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -38,8 +39,8 @@ class JsonFormatter(logging.Formatter):
             entry["request_id"] = record.request_id
         if hasattr(record, "duration_ms"):
             entry["duration_ms"] = record.duration_ms
-        if hasattr(record, "format"):
-            entry["format"] = record.format
+        if hasattr(record, "image_format"):
+            entry["format"] = record.image_format
         if hasattr(record, "size"):
             entry["size"] = record.size
         if record.exc_info and record.exc_info[0]:
@@ -124,7 +125,9 @@ def validate_url(url: str) -> str:
 def download_file(url: str, dest: Path, timeout: int = 15) -> None:
     """Download a remote file with SSRF protection and size limit."""
     validate_url(url)
-    with requests.get(url, stream=True, timeout=timeout) as r:
+    with requests.get(url, stream=True, timeout=timeout, allow_redirects=False) as r:
+        if r.is_redirect or r.is_permanent_redirect:
+            raise ValueError("Redirects are not allowed for security reasons")
         r.raise_for_status()
 
         content_length = r.headers.get("Content-Length")
@@ -164,7 +167,7 @@ def upload_to_s3(file_path: str, key_name: str, content_type: str) -> str | None
         key = key_name.lstrip("/")
         return f"{base}/{key}"
     except Exception as e:
-        logger.error(f"S3 upload failed: {e}")
+        logger.error("S3 upload failed: %s", e)
         return None
 
 
@@ -344,7 +347,7 @@ async def convert(
     t0 = time.monotonic()
 
     # --- Validation ---
-    if token != AUTH_TOKEN:
+    if not hmac.compare_digest(token, AUTH_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if not file and not src_url:
@@ -358,6 +361,15 @@ async def convert(
 
     if not 0 <= avif_speed <= 9:
         raise HTTPException(status_code=400, detail="avif_speed must be between 0 and 9")
+
+    if size is not None and (size < 1 or size > 16384):
+        raise HTTPException(status_code=400, detail="size must be between 1 and 16384")
+
+    if not 1 <= overlay_scale <= 100:
+        raise HTTPException(status_code=400, detail="overlay_scale must be between 1 and 100")
+
+    if not 0 <= overlay_opacity <= 100:
+        raise HTTPException(status_code=400, detail="overlay_opacity must be between 0 and 100")
 
     # --- Workspace ---
     request_id = str(uuid.uuid4())
@@ -398,7 +410,7 @@ async def convert(
                 download_file(overlay_url, overlay_local, timeout=10)
                 has_overlay = True
             except Exception as e:
-                logger.warning(f"Overlay download failed: {e}")
+                logger.warning("Overlay download failed: %s", e)
 
         # --- Process ---
         process_image(
@@ -435,8 +447,13 @@ async def convert(
                     key_name = generated_name
 
             logger.info(
-                f"Uploading to S3: {key_name}",
-                extra={"request_id": request_id, "duration_ms": duration_ms, "format": format},
+                "Uploading to S3: %s",
+                key_name,
+                extra={
+                    "request_id": request_id,
+                    "duration_ms": duration_ms,
+                    "image_format": format,
+                },
             )
             public_url = upload_to_s3(str(output_path), key_name, content_type)
             if public_url:
@@ -446,11 +463,13 @@ async def convert(
                 response_data["error"] = "S3 upload failed"
 
         logger.info(
-            f"Processed {format} in {duration_ms}ms",
+            "Processed %s in %dms",
+            format,
+            duration_ms,
             extra={
                 "request_id": request_id,
                 "duration_ms": duration_ms,
-                "format": format,
+                "image_format": format,
                 "size": size,
             },
         )
@@ -469,8 +488,8 @@ async def convert(
     except HTTPException:
         raise
     except pyvips.Error as e:
-        logger.error(f"Image processing failed: {e}", extra={"request_id": request_id})
+        logger.error("Image processing failed: %s", e, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail="Image processing failed") from e
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True, extra={"request_id": request_id})
+        logger.error("Unexpected error: %s", e, exc_info=True, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(e)) from e

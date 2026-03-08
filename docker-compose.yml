@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "${PIXLOAD_PORT}:8000"
+      - "${PIXLOAD_PORT}:8080"
 
     env_file:
       - .env
@@ -16,7 +16,6 @@ services:
       PIXLOAD_IMAGE_TOKEN: ${PIXLOAD_IMAGE_TOKEN}
 
       # Storage
-      STORAGE_PROVIDER: ${STORAGE_PROVIDER}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
       S3_REGION: ${S3_REGION}
       S3_BUCKET: ${S3_BUCKET}
@@ -26,6 +25,7 @@ services:
 
       # Limits
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB}
+      RATE_LIMIT: ${RATE_LIMIT}
 
     deploy:
       resources:

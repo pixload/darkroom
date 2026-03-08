@@ -10,7 +10,7 @@ Built for [Pixload](https://pixload.app/) — processing thousands of high-resol
 - **Color-accurate.** Automatic AdobeRGB/P3 → sRGB conversion. No more washed-out colors on web displays.
 - **HEIC native.** Ingests Apple/iOS photos directly via libheif.
 - **Smart watermarking.** Overlay logos with configurable scale, opacity, and "Safe Zone" positioning for vertical social formats (TikTok, Reels).
-- **Sharp output.** Lanczos resampling + adaptive unsharp masking for crisp, gallery-ready results.
+- **Sharp output.** Lanczos resampling + subtle sharpening for crisp, gallery-ready results.
 - **Secure.** SSRF protection on all remote URLs, enforced upload size limits, token authentication.
 
 ## Quick Start
@@ -130,6 +130,7 @@ Copy `.env.example` to `.env` and adjust:
 | `S3_SECRET_ACCESS_KEY` | — | Storage credentials. |
 | `PUBLIC_BASE_URL` | — | CDN base URL for generated links. |
 | `MAX_UPLOAD_SIZE_MB` | `100` | Maximum upload size. |
+| `RATE_LIMIT` | `30/minute` | Rate limit per client IP. |
 | `PIXLOAD_CPU_LIMIT` | `2` | Docker CPU quota. |
 | `PIXLOAD_MEMORY_LIMIT` | `2G` | Docker memory limit. |
 | `PIXLOAD_TMPFS_SIZE` | `2g` | tmpfs size for temp processing files. |
