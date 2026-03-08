@@ -36,5 +36,12 @@ services:
     tmpfs:
       - /tmp:size=${PIXLOAD_TMPFS_SIZE}
 
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
     ulimits:
       nofile: 1048576

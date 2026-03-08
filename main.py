@@ -131,7 +131,7 @@ def download_file(url: str, dest: Path, timeout: int = 15) -> None:
         r.raise_for_status()
 
         content_length = r.headers.get("Content-Length")
-        if content_length and int(content_length) > MAX_UPLOAD_BYTES:
+        if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES:
             raise ValueError(f"Remote file too large ({int(content_length)} bytes)")
 
         downloaded = 0
