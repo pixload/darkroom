@@ -1,7 +1,3 @@
-# --- AI Assistant Config (local only) ---
-CLAUDE.md
-.claude/
-
 # --- Security & Secrets (CRITICAL) ---
 .env
 .env.*
