@@ -1,22 +1,20 @@
 """Pixload Darkroom — High-performance image processing microservice."""
 
+import hashlib
+import ipaddress
+import logging
 import os
 import shutil
 import socket
 import uuid
-import logging
-import hashlib
-import ipaddress
-from typing import Optional
 from pathlib import Path
 from urllib.parse import urlparse
 
 import boto3
 import pyvips
 import requests
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-
 
 # --- Configuration & Logging ---
 
@@ -54,6 +52,7 @@ MIME_TYPES = {
 
 # --- Helpers ---
 
+
 def validate_url(url: str) -> str:
     """Block SSRF attempts by rejecting URLs that resolve to internal networks."""
     parsed = urlparse(url)
@@ -66,8 +65,8 @@ def validate_url(url: str) -> str:
 
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        raise ValueError(f"Cannot resolve hostname: {hostname}")
+    except socket.gaierror as err:
+        raise ValueError(f"Cannot resolve hostname: {hostname}") from err
 
     for _, _, _, _, sockaddr in addrinfo:
         ip = ipaddress.ip_address(sockaddr[0])
@@ -92,7 +91,8 @@ def download_file(url: str, dest: Path, timeout: int = 15) -> None:
             for chunk in r.iter_content(chunk_size=8192):
                 downloaded += len(chunk)
                 if downloaded > MAX_UPLOAD_BYTES:
-                    raise ValueError(f"Download exceeded {MAX_UPLOAD_BYTES // 1024 // 1024}MB limit")
+                    max_mb = MAX_UPLOAD_BYTES // 1024 // 1024
+                    raise ValueError(f"Download exceeded {max_mb}MB limit")
                 f.write(chunk)
 
 
@@ -106,7 +106,7 @@ def get_s3_client():
     )
 
 
-def upload_to_s3(file_path: str, key_name: str, content_type: str) -> Optional[str]:
+def upload_to_s3(file_path: str, key_name: str, content_type: str) -> str | None:
     s3 = get_s3_client()
     try:
         s3.upload_file(
@@ -136,6 +136,7 @@ def cleanup_temp_dir(path: Path):
 
 
 # --- Image Processing (libvips) ---
+
 
 def apply_overlay(
     image: pyvips.Image,
@@ -185,10 +186,10 @@ def process_image(
     *,
     fmt: str,
     quality: int,
-    size: Optional[int],
+    size: int | None,
     square: bool,
     strip_exif: bool,
-    overlay_path: Optional[Path],
+    overlay_path: Path | None,
     overlay_scale: int,
     overlay_safe_zone: bool,
     overlay_opacity: int,
@@ -253,10 +254,18 @@ def process_image(
 
 # --- Routes ---
 
+
 @app.get("/ping")
 def ping():
     vips_ver = f"{pyvips.version(0)}.{pyvips.version(1)}.{pyvips.version(2)}"
-    return {"ok": True, "engine": "Pixload Darkroom v2.0", "libvips": vips_ver}
+    all_formats = pyvips.get_suffixes()
+    supported = [s.lstrip(".") for s in all_formats if s.lstrip(".") in MIME_TYPES]
+    return {
+        "ok": True,
+        "engine": "Pixload Darkroom v2.0",
+        "libvips": vips_ver,
+        "formats": sorted(set(supported)),
+    }
 
 
 @app.post("/convert")
@@ -331,7 +340,7 @@ async def convert(
             try:
                 download_file(src_url, input_path)
             except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+                raise HTTPException(status_code=400, detail=str(e)) from e
 
         # --- Acquire overlay ---
         has_overlay = False
@@ -398,7 +407,7 @@ async def convert(
         raise
     except pyvips.Error as e:
         logger.error(f"Image processing failed: {e}")
-        raise HTTPException(status_code=500, detail="Image processing failed")
+        raise HTTPException(status_code=500, detail="Image processing failed") from e
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

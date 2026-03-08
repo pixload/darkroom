@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install libvips
+        run: sudo apt-get update && sudo apt-get install -y libvips42
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t pixload-darkroom:test .
+      - name: Smoke test
+        run: |
+          docker run -d --name darkroom-test -p 8080:8080 \
+            -e PIXLOAD_IMAGE_TOKEN=test \
+            pixload-darkroom:test
+          sleep 3
+          curl -sf http://localhost:8080/ping | grep '"ok":true'
+          docker stop darkroom-test
