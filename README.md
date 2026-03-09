@@ -1,189 +1,159 @@
 # Pixload Darkroom
 
-A high-performance, color-managed image processing microservice built for production.
+High-performance image processing microservice powered by [libvips](https://www.libvips.org/).
 
-**Pixload Darkroom** is a standalone microservice designed to handle heavy image transformations with surgical precision. Unlike standard resizing scripts that just "squash pixels", Darkroom treats image processing like a digital development lab: preserving color integrity, sharpness, and metadata logic.
+Built for [Pixload](https://pixload.app/) — processing thousands of high-resolution event photos where color accuracy, speed, and reliability matter.
 
-## Why "Darkroom"?
+## Features
 
-At [Pixload](https://pixload.app/), we process thousands of high-resolution event photos. We needed a pipeline that was fast enough for live events but sharp enough for professional photographers. We couldn't find a tool that handled **ICC Color Profiles** and **HEIC ingestion** correctly out of the box, so we built Darkroom.
-
-## Key Features
-
-- **Native HEIC Support:** Seamlessly ingests Apple/iOS photos via `libheif` without quality loss.
-    
-- **Professional Color Management:** Automatically converts AdobeRGB/P3 to **sRGB** using internal color management to prevent "washed out" colors on web displays.
-    
-- **Smart Watermarking:** Built-in engine to overlay logos with intelligent "Safe Zone" positioning for vertical social media (TikTok/Instagram Reels).
-    
-- **Surgical Resizing:** Uses **Lanczos** resampling (not Bicubic) paired with adaptive Unsharp Masking for crisp, gallery-ready thumbnails.
-    
-- **Hardware Accelerated:**
-    - **AVIF:** Uses `SVT-AV1` optimized for multi-core CPUs.
-    - **JPEG:** Uses `libjpeg-turbo` for SIMD-accelerated compression.
-    
-- **Hybrid Response Mode:** Can return the binary file for immediate processing AND upload to S3 simultaneously (returning the URL in headers), reducing latency.
-    
-- **Resource Safety:** Built-in thread limiting for ImageMagick to prevent CPU context-switching saturation under heavy concurrent loads.
-    
-
-## Architecture
-
-The service wraps **ImageMagick 7** and **avifenc** inside a **FastAPI** shell, running in a highly optimized Docker container.
-
-1. **Input:** JPG, PNG, WEBP, HEIC (Streamed).
-    
-2. **Processing pipeline:**
-    - Auto-orientation (EXIF).
-    - Color Space Conversion (to sRGB).
-    - Lanczos Resampling.
-    - **Smart Overlay/Composite** (Optional).
-    - Output Sharpening (Web-optimized).
-    
-3. **Encoding:** SVT-AV1 or TurboJPEG.
-    
-4. **Output:** JPG, PNG, WEBP, AVIF.
-    
+- **Fast.** libvips processes images 3–10x faster than ImageMagick with a fraction of the memory (streaming pipeline, no full-image decompression).
+- **Color-accurate.** Automatic AdobeRGB/P3 → sRGB conversion. No more washed-out colors on web displays.
+- **HEIC native.** Ingests Apple/iOS photos directly via libheif.
+- **Smart watermarking.** Overlay logos with configurable scale, opacity, and "Safe Zone" positioning for vertical social formats (TikTok, Reels).
+- **Sharp output.** Lanczos resampling + subtle sharpening for crisp, gallery-ready results.
+- **Secure.** SSRF protection on all remote URLs, enforced upload size limits, token authentication.
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker & Docker Compose.
-    
-
-### Installation
-
-1. **Clone the repository:**
-    
-    Bash
-    
-    ```
-    git clone https://github.com/pixload/darkroom.git
-    cd darkroom
-    ```
-    
-2. Configure Environment:
-    
-    Create a .env file based on your needs (DO NOT commit this file):
-    
-    Ini, TOML
-    
-    ```
-    # Secrets
-    PIXLOAD_IMAGE_TOKEN=your_super_secret_token
-    
-    # S3 / R2 Configuration
-    STORAGE_PROVIDER=r2
-    S3_ENDPOINT_URL=https://your-id.r2.cloudflarestorage.com
-    S3_BUCKET=pixload
-    S3_ACCESS_KEY_ID=your_key
-    S3_SECRET_ACCESS_KEY=your_secret
-    PUBLIC_BASE_URL=https://cdn.pixload.events
-    ```
-    
-3. **Build & Run:**
-    
-    Bash
-    
-    ```
-    docker-compose up -d --build
-    ```
-    
-    The service is now running on port `41870` (default).
-    
-
-## Performance Tuning
-
-For high-concurrency environments (e.g., 50+ simultaneous uploads), we use a specific strategy to balance FastAPI workers and ImageMagick threads to avoid locking the CPU.
-
-Recommended `.env` settings for a 12-core CPU environment:
-
-Ini, TOML
-
-```
-# Force ImageMagick to use a single thread per process.
-# We rely on FastAPI workers (Uvicorn) for parallelism.
-MAGICK_THREAD_LIMIT=1
-OMP_NUM_THREADS=1
-
-# Hardware limits for the container
-PIXLOAD_CPU_LIMIT=12
-PIXLOAD_MEMORY_LIMIT=16G
+```bash
+git clone https://github.com/pixload/darkroom.git
+cd darkroom
+cp .env.example .env   # edit with your values
+docker-compose up -d --build
 ```
 
-## API Usage
+The service runs on port `41870` by default (configurable via `PIXLOAD_PORT`).
 
-**Endpoint:** `POST /convert`
+Health check:
 
-### Example 1: Hybrid Mode (Upload + Download)
-
-Uploads the result to S3 AND returns the binary file immediately.
-
-Bash
-
+```bash
+curl http://localhost:41870/ping
 ```
-curl -X POST "http://localhost:41870/convert" \
-  -F "token=your_secure_token" \
+
+## API
+
+### `POST /convert`
+
+Accepts multipart form data. All requests require a valid `token`.
+
+#### Input
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `token` | string | **Required.** API authentication token. |
+| `file` | file | Image file upload (multipart). |
+| `src_url` | string | Or fetch image from a remote URL. Provide `file` or `src_url`. |
+
+#### Transform
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `format` | string | `jpg` | Output format: `jpg`, `png`, `webp`, `avif`, `heic`. |
+| `q` | int | `80` | Quality (1–100). For AVIF, 60–65 is a good starting point. |
+| `size` | int | — | Resize to fit within `size`x`size` pixels (long edge, shrink only). |
+| `square` | bool | `false` | Center-crop to exact `size`x`size` square. |
+| `strip_exif` | bool | `false` | Remove all metadata (EXIF, IPTC, XMP). |
+
+#### Overlay / Watermark
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `overlay_url` | string | — | URL of a PNG logo to composite onto the image. |
+| `overlay_scale` | int | `15` | Logo width as percentage of image width. |
+| `overlay_opacity` | int | `100` | Opacity (0–100). 30–50 works well for watermarks. |
+| `overlay_safe_zone` | bool | `true` | Position logo centered, 250px from bottom (avoids TikTok/Reels UI). When `false`, places bottom-right +50px. |
+
+#### Output
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `upload_s3` | bool | `false` | Upload result to configured S3/R2 bucket. |
+| `key_name` | string | — | Force a specific S3 key. Auto-generated from content hash if omitted. |
+| `key_prefix` | string | — | S3 folder prefix (e.g. `events/123`). |
+| `return_binary` | bool | `false` | Return the processed image as the HTTP response body. |
+
+#### Advanced
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `avif_speed` | int | `6` | libheif encoder speed (0 = slowest/best, 9 = fastest). |
+
+### Examples
+
+**Convert HEIC to AVIF, upload to S3:**
+
+```bash
+curl -X POST http://localhost:41870/convert \
+  -F "token=your_token" \
   -F "file=@photo.heic" \
   -F "format=avif" \
-  -F "upload_s3=true" \
-  -F "return_binary=true" \
-  -v
+  -F "q=65" \
+  -F "upload_s3=true"
 ```
 
-### Example 2: Watermarking with "Safe Zone"
+**Resize + watermark from URL:**
 
-Downloads source from URL, applies a logo (15% width), and positions it to avoid TikTok/Instagram UI.
-
-Bash
-
-```
-curl -X POST "http://localhost:41870/convert" \
-  -F "token=your_secure_token" \
+```bash
+curl -X POST http://localhost:41870/convert \
+  -F "token=your_token" \
   -F "src_url=https://example.com/photo.jpg" \
+  -F "size=1920" \
   -F "overlay_url=https://example.com/logo.png" \
   -F "overlay_scale=15" \
   -F "overlay_safe_zone=true" \
   -F "upload_s3=true"
 ```
 
-### General Parameters
+**Get binary response (e.g. for proxying):**
 
-|**Parameter**|**Type**|**Default**|**Description**|
-|---|---|---|---|
-|`file`|File|-|Binary file upload (Multipart).|
-|`src_url`|String|-|Or download source image from a remote URL.|
-|`format`|String|`jpg`|Output format: `jpg`, `webp`, `avif`, `png`.|
-|`q`|Int|`80`|Quality (0-100). For AVIF, 60-65 is recommended.|
-|`size`|Int|`None`|Resize (long edge) in pixels. Maintains aspect ratio.|
-|`square`|Bool|`0`|If 1, center-crops to a square (useful for thumbnails).|
-|`strip_exif`|Bool|`False`|If True, removes all metadata (EXIF/IPTC/XMP).|
-|`upload_s3`|Bool|`False`|If True, uploads the result to the configured S3 bucket.|
-|`return_binary`|Bool|`False`|If True, returns content in body even if `upload_s3` is enabled.|
+```bash
+curl -X POST http://localhost:41870/convert \
+  -F "token=your_token" \
+  -F "file=@photo.jpg" \
+  -F "format=webp" \
+  -F "size=800" \
+  -F "return_binary=true" \
+  -o output.webp
+```
 
-### Overlay & Watermarking Parameters
+## Configuration
 
-| Parameter           | Type   | Default | Description                                                                   |
-| :------------------ | :----- | :------ | :---------------------------------------------------------------------------- |
-| `overlay_url`       | String | `None`  | URL of the PNG logo/watermark to superimpose.                                 |
-| `overlay_scale`     | Int    | `15`    | Size of the overlay relative to the image width (in %).                       |
-| `overlay_opacity`   | Int    | `100`   | Opacity of the overlay (0-100). Use 30-50 for watermarks.                     |
-| `overlay_safe_zone` | Bool   | `True`  | If True, positions logo higher to avoid UI on vertical videos (TikTok/Reels). |
-### Advanced Parameters (Surgical Control)
+Copy `.env.example` to `.env` and adjust:
 
-| **Parameter** | **Default** | **Description**                                                 |
-| ------------- | ----------- | --------------------------------------------------------------- |
-| `avif_speed`  | `6`         | SVT-AV1 preset (0-10). 6 is the best speed/compression balance. |
-| `avif_depth`  | `8`         | Bit depth (8 or 10). 10-bit prevents banding in gradients.      |
-| `avif_yuv`    | `420`       | Chroma subsampling. 444 is sharper for graphics.                |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PIXLOAD_IMAGE_TOKEN` | — | API token. |
+| `S3_ENDPOINT_URL` | — | S3-compatible endpoint (R2, MinIO, AWS). |
+| `S3_BUCKET` | `pixload` | Target bucket. |
+| `S3_REGION` | `auto` | Bucket region. |
+| `S3_ACCESS_KEY_ID` | — | Storage credentials. |
+| `S3_SECRET_ACCESS_KEY` | — | Storage credentials. |
+| `PUBLIC_BASE_URL` | — | CDN base URL for generated links. |
+| `MAX_UPLOAD_SIZE_MB` | `100` | Maximum upload size. |
+| `RATE_LIMIT` | `30/minute` | Rate limit per client IP. |
+| `PIXLOAD_CPU_LIMIT` | `2` | Docker CPU quota. |
+| `PIXLOAD_MEMORY_LIMIT` | `2G` | Docker memory limit. |
+| `PIXLOAD_TMPFS_SIZE` | `2g` | tmpfs size for temp processing files. |
+
+## Development
+
+```bash
+# Install deps
+pip install -r requirements.txt
+
+# Run locally (requires libvips on your system)
+uvicorn main:app --reload --port 8080
+
+# Run tests
+pytest
+
+# Lint
+ruff check .
+ruff format --check .
+```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENCE](LICENCE) for details.
 
-<p align="center">
-
-Built with ❤️ by the <a href="https://pixload.app">Pixload</a> Engineering Team.
-
-</p> 
+Built by the [Pixload](https://pixload.app/) engineering team.

@@ -1,0 +1,30 @@
+[project]
+name = "pixload-darkroom"
+version = "2.0.0"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit (security)
+]
+ignore = [
+    "S104",  # binding to 0.0.0.0 (expected in containers)
+    "S108",  # /tmp usage (deliberate: uuid-namespaced, cleaned up after)
+    "B008",  # function calls in defaults (FastAPI's File()/Form() pattern)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105"]  # allow assert + hardcoded test tokens
